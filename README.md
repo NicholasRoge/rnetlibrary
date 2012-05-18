@@ -1,4 +1,0 @@
-rnetlibrary
-===========
-
-Java Network Library

@@ -1,0 +1,7 @@
+This project should be used to compile a library to make the interfacing with the network easier and more convenient.
+
+Project information:
+	Title:  RNetworkLibrary
+	Developer:  Nicholas Rogé
+	Purpose:
+		This project is meant to be compiled into a jar file and used in other projects to make network interface easier, and more convenient.
