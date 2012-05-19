@@ -8,17 +8,24 @@ import java.util.Date;
 import java.util.List;
 
 import roge.net.ConnectionClient.DataReceivedListener;
+import roge.net.ConnectionClient.SignalReceivedListener;
 
 /**
  * @author Nicholas Rogé
  */
-public class ConnectionServer implements DataReceivedListener{
-    /**Data that should be sent when a client is closing its connection to the server.*/
-    public static final String CLOSE_CONNECTION="connection_close";
+public class ConnectionServer implements DataReceivedListener,SignalReceivedListener{
+    /**Signal that should be sent when a client is closing its connection to the server.*/
+    public static class CloseConnectionSignal extends Signal{
+        private static final long serialVersionUID = 2882637983514840538L;
+    };
     /**Data that will be received by the client if its connection to the server was a success.*/
-    public static final String CONNECT_SUCCESS="connect_success";
+    public static class ConnectSuccessSignal extends Signal{
+        private static final long serialVersionUID = -1261872129312562381L;
+    };
     /**Data that will be received by the client if its connection to the server was a failure.*/
-    public static final String CONNECT_FAILURE="connect_failure";
+    public static class ConnectFailureSignal extends Signal{
+        private static final long serialVersionUID = -5165976077218168691L;
+    };
     
     /**
      * Interface which classes that would like notification of a new client connection should implement. 
@@ -71,12 +78,15 @@ public class ConnectionServer implements DataReceivedListener{
     
     /*Begin Overridden Methods*/
     @Override public void onDataReceived(ConnectionClient client,Object data){
-        if(((String)data).equals(ConnectionServer.CLOSE_CONNECTION)){
+    }
+    
+    @Override public void onSignalReceived(ConnectionClient client,Signal signal){
+        if(signal instanceof CloseConnectionSignal){
             for(ClientDisconnectListener listener:this.getClientDisconnectListeners()){
                 listener.onClientDisconnect(client);
             }
             
-            client.disconnect();
+            client.disconnect(false);
             
             this.getClientList().remove(client);
         }
@@ -147,7 +157,7 @@ public class ConnectionServer implements DataReceivedListener{
         if(accept_client){
             this.getClientList().add(client);
             try{
-                client.send(ConnectionServer.CONNECT_SUCCESS);
+                client.send(new ConnectSuccessSignal());
             }catch(IOException e){
                 e.toString();
             }
@@ -156,7 +166,7 @@ public class ConnectionServer implements DataReceivedListener{
             System.out.print("Client connected from "+client.getIP()+" at "+formatter.format(new Date())+"\n\n");
         }else{
             try{
-                client.send(ConnectionServer.CONNECT_FAILURE);
+                client.send(new ConnectFailureSignal());
             }catch(IOException e){
                 e.printStackTrace();
             }
@@ -225,7 +235,7 @@ public class ConnectionServer implements DataReceivedListener{
                 }
             }
         });
-        this.__new_connection_listener.run();
+        this.__new_connection_listener.start();
     }    
     /*End Other Essential Methods*/
 }

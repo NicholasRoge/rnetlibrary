@@ -29,6 +29,21 @@ public class ConnectionClient{
     }
     
     /**
+     * Interface which allows the broadcasting of a signal to those that wish to receive it.
+     * 
+     * @author Nicholas Rogé
+     */
+    public static interface SignalReceivedListener{
+        /**
+         * Whenever a ConnectionSignal is received on the ConnectionClient object, the object calls this method.
+         * 
+         * @param client Client who received the signal.
+         * @param signal Signal received.
+         */
+        public void onSignalReceived(ConnectionClient client,Signal signal);
+    }
+    
+    /**
      * Interface which any classes that would like to receive data updates from this object should implement.
      * 
      * @author Nicholas Rogé
@@ -37,20 +52,21 @@ public class ConnectionClient{
         /**
          * Whenever data on the ConnectionClient object, the object calls this method.
          * 
-         * @param client Client which received the message.
+         * @param client Client who received the message.
          * @param data Object which was received.
          */
         public void onDataReceived(ConnectionClient client,Object data);
    }
     
-    private String                     __host_address;
-    private ObjectInputStream          __input;
-    private List<DataReceivedListener> __listeners;
-    private Thread                     __message_listener;
-    private ObjectOutputStream         __output;
-    private int                        __port;
-    private boolean                    __server_ready;
-    private Socket                     __socket;
+    private String                         __host_address;
+    private ObjectInputStream              __input;
+    private List<DataReceivedListener>     __data_received_listeners;
+    private Thread                         __message_listener;
+    private ObjectOutputStream             __output;
+    private int                            __port;
+    private int                            __server_status;
+    private List<SignalReceivedListener>   __signal_received_listeners;
+    private Socket                         __socket;
     
     /*Begin Constructors*/
     /**
@@ -71,7 +87,7 @@ public class ConnectionClient{
         this.__host_address=this.__socket.getInetAddress().getHostAddress();
         this.__port=this.__socket.getPort();
         
-        this.__server_ready=false;
+        this.__server_status=1;
         
         this._connect();
     }
@@ -87,7 +103,11 @@ public class ConnectionClient{
         this.__host_address=host_address;
         this.__port=port;
         
-        this.__server_ready=!require_server_sync;
+        if(require_server_sync){
+            this.__server_status=0;
+        }else{
+            this.__server_status=1;
+        }
     }
     /*End Constructors*/
     
@@ -100,20 +120,46 @@ public class ConnectionClient{
     public String getIP(){
         return this.__host_address;
     }
+    
+    /**
+     * Returns the status of the connection to the server.
+     * 
+     * @return Will return <code>true</code> if the connection has been made, or <code>false</code> otherwise.
+     */
+    public boolean isConnected(){
+        if(this.__socket==null){
+            return false;
+        }else{
+            return !this.__socket.isClosed();
+        }
+    }
     /*End Getter Methods*/
     
     /*Begin Other Essential Methods*/
+    /**
+     * Adds a listener to be called when a signal is received.
+     * 
+     * @param listener Object to be called upon signal receipt.
+     */
+    public void addSignalListener(SignalReceivedListener listener){
+        if(this.__signal_received_listeners==null){
+            this.__signal_received_listeners=new ArrayList<SignalReceivedListener>();
+        }
+        
+        this.__signal_received_listeners.add(listener);
+    }
+    
     /**
      * Adds a listener to be called when data is received.
      * 
      * @param listener Object to be called upon data receipt.
      */
     public void addDataRecievedListener(DataReceivedListener listener){
-        if(this.__listeners==null){
-            this.__listeners=new ArrayList<DataReceivedListener>();
+        if(this.__data_received_listeners==null){
+            this.__data_received_listeners=new ArrayList<DataReceivedListener>();
         }
 
-        this.__listeners.add(listener);
+        this.__data_received_listeners.add(listener);
     }
     
     /**
@@ -126,9 +172,28 @@ public class ConnectionClient{
             throw new NullPointerException();
         }
         
-        if(this.__listeners!=null){
-            for(DataReceivedListener listener:this.__listeners){
+        if(this.__data_received_listeners!=null){
+            for(DataReceivedListener listener:this.__data_received_listeners){
                 listener.onDataReceived(this,data);
+            }
+        }
+    }
+    
+    /**
+     * Calls the onSignalReceived method of all its listeners.
+     * 
+     * @param signal Signal being broadcasted.  If this parameter is null, a <code>NullPointerException</code> will be thrown.
+     */
+    protected void _broadcastSignal(Signal signal){
+        if(signal==null){
+            throw new NullPointerException();
+        }
+        
+        this._onSignalReceived(this,signal);
+        
+        if(this.__signal_received_listeners!=null){
+            for(SignalReceivedListener listener:this.__signal_received_listeners){
+                listener.onSignalReceived(this,signal);
             }
         }
     }
@@ -155,33 +220,58 @@ public class ConnectionClient{
     protected void _connect() throws IOException{
         try{            
             this.__output=new ObjectOutputStream(this.__socket.getOutputStream());
-            this.__output.flush();
-            
-            this.__input=new ObjectInputStream(this.__socket.getInputStream());            
+            this.__output.flush();            
         }catch(IOException e){
-            System.out.print("Could not open the read or write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+            System.out.print("Could not open the write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
             
             throw e;
         }
+        
+        new Thread(new Runnable(){
+            @Override public void run(){
+                try{
+                    ConnectionClient.this.__input=new ObjectInputStream(ConnectionClient.this.__socket.getInputStream());
+                }catch(IOException e){
+                    System.out.print("Could not open the write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+                }
+            }
+        }).start();
 
         this._startMessageListener();
         
-        while(!this.__server_ready){  //Block while the server isn't ready to receive data.
+        while(this.__server_status==0){  //Block while the server isn't ready to receive data.
             try {
                 Thread.sleep(10);  //We have to add a small break to allow the variable to actually be modified.  //Ten milliseconds is the minimum amount of required to wait for this loop to function properly
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
+        
+        if(this.__server_status==-1){
+                this.disconnect();
+                
+                throw new IOException("Connection to server refused.");
+        }
     }
     
     /**
-     * Disconnects this object from the server.  This method should ALWAYS be called before a program is closed.
+     * Disconnects this object from the server.  This method should ALWAYS be called when the connection will no longer be used.
      */
     public void disconnect(){
+        this.disconnect(true);
+    }
+    
+    /**
+     * Disconnects this object from the server.  This method should ALWAYS be called when the connection will no longer be used.
+     * 
+     * @param send_connection_close_notice Unless you are acting as the server, this should always be true.  In most cases, it is sufficient to simply use the {@link ConnectionClient#disconnect()} method.
+     */
+    public void disconnect(boolean send_connection_close_notice){
         if(this.__socket!=null){
             try{
-                this.send(ConnectionServer.CLOSE_CONNECTION);
+                if(send_connection_close_notice){
+                    this.send(new ConnectionServer.CloseConnectionSignal());
+                }
                 
                 this.__message_listener.interrupt();
                 this.__input.close();
@@ -190,6 +280,14 @@ public class ConnectionClient{
             }catch(Exception e){
                 e.printStackTrace();
             }
+        }
+    }
+    
+    protected void _onSignalReceived(ConnectionClient client,Signal signal){
+        if(signal instanceof ConnectionServer.ConnectSuccessSignal){
+            this.__server_status=1; //1 indicates that the server is ready to recieve data.
+        }else if(signal instanceof ConnectionServer.ConnectFailureSignal){
+            this.__server_status=-1;
         }
     }
     
@@ -220,6 +318,14 @@ public class ConnectionClient{
             }
         }
         
+        while(this.__input==null){  //Block while the input stream is null.  (I.E.:  While it's waiting for the headers from the other side of the socket.
+            try{
+                Thread.sleep(10);
+            }catch(InterruptedException e){
+                e.printStackTrace();
+            }
+        }
+        
         this.__message_listener=new Thread(new Runnable(){
             @Override public void run(){
                 Object data=null;
@@ -229,16 +335,10 @@ public class ConnectionClient{
                         data=ConnectionClient.this.__input.readObject();
                         System.out.print("Data recieved:  "+data.toString()+"\n");
 
-                        if(ConnectionClient.this.__server_ready){
-                            ConnectionClient.this._broadcastData(data);
+                        if(data instanceof Signal){
+                            ConnectionClient.this._broadcastSignal((Signal)data);
                         }else{
-                            if(data.equals(ConnectionServer.CONNECT_SUCCESS)){
-                                ConnectionClient.this.__server_ready=true;
-                            }else{
-                                ConnectionClient.this.disconnect();
-                                
-                                throw new IOException("Could not connect to the server.  Connection closed.  Use the \"connect()\" method to attempt a reconnect.");
-                            }
+                            ConnectionClient.this._broadcastData(data);
                         }
                     }
                 }catch(ClassNotFoundException e){
@@ -250,7 +350,7 @@ public class ConnectionClient{
                 }
             }
         });
-        this.__message_listener.run();
+        this.__message_listener.start();
     }
     /*End Other Essential Methods*/
 }
