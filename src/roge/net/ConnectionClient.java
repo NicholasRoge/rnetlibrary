@@ -4,6 +4,9 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -14,21 +17,32 @@ import roge.net.ConnectionServer.ClientConnectListener;
 /**
  * @author Nicholas Rogé
  */
-public class ConnectionClient{
+public class ConnectionClient{    
+    /**
+     * @author Nicholas Rogé
+     */
+    public static class NotConnected extends Throwable{
+        private static final long serialVersionUID = 3442734742955673377L;
+
+        @Override public String toString(){
+            return "You must initialize the connection using the \"connect()\" method before you can send anything.";
+        }
+    }
+    
     /**
      * Interface which any classes that would like to receive data updates from this object 
      * 
      * @author Nicholas Rogé
      */
     public static interface DataReceivedListener{
-        public void onDataReceived(ConnectionClient client,String data);
+        public void onDataReceived(ConnectionClient client,Object data);
    }
     
     private String                     __host_address;
-    private DataInputStream            __input;
+    private ObjectInputStream          __input;
     private List<DataReceivedListener> __listeners;
     private Thread                     __message_listener;
-    private DataOutputStream           __output;
+    private ObjectOutputStream         __output;
     private int                        __port;
     private boolean                    __server_ready;
     private Socket                     __socket;
@@ -39,9 +53,9 @@ public class ConnectionClient{
      * 
      * @param socket Socket to use as the base for this Class
      * 
-     * @throws IllegalArgumentException Thrown if the socket parameter is null.
+     * @throws IOException Throws IOException in the event that it can't open the read or write streams on this socket.
      */
-    public ConnectionClient(Socket socket,boolean require_server_sync){
+    public ConnectionClient(Socket socket,boolean require_server_sync) throws IOException{
         if(socket==null){
             throw new IllegalArgumentException();
         }
@@ -80,7 +94,7 @@ public class ConnectionClient{
         this.__listeners.add(listener);
     }
     
-    public void broadcastData(String data){
+    public void broadcastData(Object data){
         if(this.__listeners!=null){
             for(DataReceivedListener listener:this.__listeners){
                 listener.onDataReceived(this,data);
@@ -96,19 +110,23 @@ public class ConnectionClient{
         this._connect();
     }
     
-    protected void _connect(){
+    protected void _connect() throws IOException{
         try{
-            this.__input=new DataInputStream(this.__socket.getInputStream());
-            this.__output=new DataOutputStream(this.__socket.getOutputStream());            
+            this.__output=new ObjectOutputStream(this.__socket.getOutputStream());
+            this.__output.flush();
+            
+            this.__input=new ObjectInputStream(this.__socket.getInputStream());            
         }catch(IOException e){
-            System.out.print("Could not open the read or write stream on this client.  Cause:  "+e.getMessage());
+            System.out.print("Could not open the read or write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+            
+            throw e;
         }
-        
+
         this._startMessageListener();
         
         while(!this.__server_ready){  //Block while the server isn't ready to receive data.
             try {
-                Thread.sleep(10);  //We have to add a small break to allow the variable to actually be modified.
+                Thread.sleep(10);  //We have to add a small break to allow the variable to actually be modified.  //Ten milliseconds is the minimum amount of required to wait for this loop to function properly
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -128,39 +146,42 @@ public class ConnectionClient{
         }
     }
     
-    public void send(String data) throws IOException{
+    public void send(Object data) throws IOException{
         if(this.__socket==null){
-            throw new IOException("You must initialize the connection using the \"connect()\" method before you can send anything.");
+            throw new IOException(new NotConnected());
         }
         
-        this.__output.writeUTF(data);
+        this.__output.writeObject(data);
     }
     
     protected void _startMessageListener(){
         this.__message_listener=new Thread(){
             @Override public void run(){
-                String data=null;
+                Object data=null;
 
                 try{
                     while(true){
-                        data=ConnectionClient.this.__input.readUTF();
-                        System.out.print("Data message recieved:  "+data+"\n");
-                        if(data==null){
-                            break;
+                        data=ConnectionClient.this.__input.readObject();
+                        System.out.print("Data recieved:  "+data.toString()+"\n");
+
+                        if(ConnectionClient.this.__server_ready){
+                            ConnectionClient.this.broadcastData(data);
                         }else{
-                            if(ConnectionClient.this.__server_ready){
-                                ConnectionClient.this.broadcastData(data);
+                            if(data.equals(ConnectionServer.CONNECT_SUCCESS)){
+                                ConnectionClient.this.__server_ready=true;
                             }else{
-                                if(data.equals(ConnectionServer.CONNECT_SUCCESS)){
-                                    ConnectionClient.this.__server_ready=true;
-                                }
+                                ConnectionClient.this.disconnect();
+                                
+                                throw new IOException("Could not connect to the server.  Connection closed.  Use the \"connect()\" method to attempt a reconnect.");
                             }
                         }
                     }
+                }catch(ClassNotFoundException e){
+                    System.out.print(";;;\n");
                 }catch(EOFException e){
                     System.out.print("Cannot read any further:  Remote connection closed.\n");
                 }catch(IOException e){
-                    System.out.print("IOException caught while listening for incoming data!  Message:  "+e.getMessage());
+                    System.out.print("IOException caught while listening for incoming data!  Message:\n    "+e.getMessage()+"\n");
                 }
             }
         };
