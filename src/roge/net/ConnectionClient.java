@@ -220,7 +220,7 @@ public class ConnectionClient{
             }
         }
         
-        this.__message_listener=new Thread(){
+        this.__message_listener=new Thread(new Runnable(){
             @Override public void run(){
                 Object data=null;
 
@@ -249,8 +249,8 @@ public class ConnectionClient{
                     System.out.print("IOException caught while listening for incoming data!  Message:\n    "+e.getMessage()+"\n");
                 }
             }
-        };
-        this.__message_listener.start();
+        });
+        this.__message_listener.run();
     }
     /*End Other Essential Methods*/
 }

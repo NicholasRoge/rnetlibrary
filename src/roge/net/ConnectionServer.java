@@ -7,10 +7,12 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
+import roge.net.ConnectionClient.DataReceivedListener;
+
 /**
  * @author Nicholas Rogé
  */
-public class ConnectionServer{
+public class ConnectionServer implements DataReceivedListener{
     /**Data that should be sent when a client is closing its connection to the server.*/
     public static final String CLOSE_CONNECTION="connection_close";
     /**Data that will be received by the client if its connection to the server was a success.*/
@@ -34,11 +36,26 @@ public class ConnectionServer{
         public boolean onClientConnect(ConnectionClient client);
     }
     
-    private List<ConnectionClient>      __clients;
-    private List<ClientConnectListener> __client_connect_listeners;
-    private int                         __port;
-    private ServerSocket                __socket;
-    private Thread                      __new_connection_listener;
+    /**
+     * Interface which classes that would like notification of a client disconnecting should implement. 
+     * 
+     * @author Nicholas Rogé
+     */
+    public static interface ClientDisconnectListener{
+        /**
+         * Called when a client disconnects from the server.
+         * 
+         * @param client Client which is disconnecting itself.
+         */
+        public void onClientDisconnect(ConnectionClient client);
+    }
+    
+    private List<ConnectionClient>         __clients;
+    private List<ClientConnectListener>    __client_connect_listeners;
+    private List<ClientDisconnectListener> __client_disconnect_listeners;
+    private int                            __port;
+    private ServerSocket                   __socket;
+    private Thread                         __new_connection_listener;
     
     
     /*Begin Constructors*/
@@ -51,6 +68,20 @@ public class ConnectionServer{
         this.__port=port;
     }
     /*End Constructors*/
+    
+    /*Begin Overridden Methods*/
+    @Override public void onDataReceived(ConnectionClient client,Object data){
+        if(((String)data).equals(ConnectionServer.CLOSE_CONNECTION)){
+            for(ClientDisconnectListener listener:this.getClientDisconnectListeners()){
+                listener.onClientDisconnect(client);
+            }
+            
+            client.disconnect();
+            
+            this.getClientList().remove(client);
+        }
+    }
+    /*End Overridden Methods*/
     
     /*Begin Getter Methods*/
     /**
@@ -77,6 +108,19 @@ public class ConnectionServer{
         }
         
         return this.__client_connect_listeners;
+    }
+    
+    /**
+     * Returns the list of all Objects which are listening for any clients that are disconnecting.
+     * 
+     * @return The list of all Objects which are listening for any clients that are disconnecting.
+     */
+    public List<ClientDisconnectListener> getClientDisconnectListeners(){
+        if(this.__client_disconnect_listeners==null){
+            this.__client_disconnect_listeners=new ArrayList<ClientDisconnectListener>();
+        }
+        
+        return this.__client_disconnect_listeners;
     }
     /*End Getter Methods*/
     
@@ -108,6 +152,7 @@ public class ConnectionServer{
                 e.toString();
             }
 
+            client.addDataRecievedListener(this);
             System.out.print("Client connected from "+client.getIP()+" at "+formatter.format(new Date())+"\n\n");
         }else{
             try{
@@ -126,6 +171,17 @@ public class ConnectionServer{
     public void addClientConnectListener(ClientConnectListener listener){
         if(!this.getClientConnectListeners().contains(listener)){
             this.getClientConnectListeners().add(listener);
+        }
+    }
+    
+    /**
+     * Adds a listener to be called when a client disconnects from the server.
+     * 
+     * @param listener Listener to be called when a client disconnects from the server.
+     */
+    public void addClientDisconnectListener(ClientDisconnectListener listener){
+        if(!this.getClientDisconnectListeners().contains(listener)){
+            this.getClientDisconnectListeners().add(listener);
         }
     }
     
@@ -157,7 +213,7 @@ public class ConnectionServer{
             }
         }
         
-        this.__new_connection_listener=new Thread(){
+        this.__new_connection_listener=new Thread(new Runnable(){
             @Override public void run(){
                 try{
                     while(true){
@@ -168,8 +224,8 @@ public class ConnectionServer{
                     //TODO_HIGH:  Make a handler for this exception here
                 }
             }
-        };
-        this.__new_connection_listener.start();
+        });
+        this.__new_connection_listener.run();
     }    
     /*End Other Essential Methods*/
 }
