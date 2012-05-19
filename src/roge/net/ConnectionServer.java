@@ -1,26 +1,28 @@
 package roge.net;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.UnknownHostException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-import roge.net.ConnectionClient.DataReceivedListener;
-
 /**
  * @author Nicholas Rogé
  */
-public class ConnectionServer{       
+public class ConnectionServer{
+    /**Data that should be sent when a client is closing its connection to the server.*/
+    public static final String CLOSE_CONNECTION="connection_close";
+    /**Data that will be received by the client if its connection to the server was a success.*/
     public static final String CONNECT_SUCCESS="connect_success";
+    /**Data that will be received by the client if its connection to the server was a failure.*/
     public static final String CONNECT_FAILURE="connect_failure";
     
+    /**
+     * Interface which classes that would like notification of a new client connection should implement. 
+     * 
+     * @author Nicholas Rogé
+     */
     public static interface ClientConnectListener{
         /**
          * Called when a client attempts to connect to the server.
@@ -40,12 +42,22 @@ public class ConnectionServer{
     
     
     /*Begin Constructors*/
+    /**
+     * Constructs the object, telling it to listen to the given port.
+     * 
+     * @param port Port this object should listen to.
+     */
     public ConnectionServer(int port){
         this.__port=port;
     }
     /*End Constructors*/
     
     /*Begin Getter Methods*/
+    /**
+     * Returns the list of all the clients which are connected to this object.
+     * 
+     * @return The list of all the clients which are connected to this object.
+     */
     public List<ConnectionClient> getClientList(){
         if(this.__clients==null){
             this.__clients=new ArrayList<ConnectionClient>();
@@ -54,6 +66,11 @@ public class ConnectionServer{
         return this.__clients;
     }
     
+    /**
+     * Returns the list of all Objects which are listening for incoming client connections.
+     * 
+     * @return The list of all Objects which are listening for incoming client connections.
+     */
     public List<ClientConnectListener> getClientConnectListeners(){
         if(this.__client_connect_listeners==null){
             this.__client_connect_listeners=new ArrayList<ClientConnectListener>();
@@ -64,6 +81,11 @@ public class ConnectionServer{
     /*End Getter Methods*/
     
     /*Begin Other Essential Methods*/
+    /**
+     * Accepts or declines the client from connecting to the server.
+     * 
+     * @param client Client attempting to connect to the server.
+     */
     protected void _acceptClient(ConnectionClient client){
         final SimpleDateFormat formatter=new SimpleDateFormat("HH:mm:ss' on 'dd/MM/yyyy");
 
@@ -96,12 +118,20 @@ public class ConnectionServer{
         }
     }
     
+    /**
+     * Adds a listener to be called when a client attempts to connect.
+     * 
+     * @param listener Listener to be called when a client attempts to connect.
+     */
     public void addClientConnectListener(ClientConnectListener listener){
         if(!this.getClientConnectListeners().contains(listener)){
             this.getClientConnectListeners().add(listener);
         }
     }
     
+    /**
+     * Starts the server.
+     */
     public void start(){
         try{
             System.out.print("Starting server on port "+this.__port+"...\n");
@@ -117,13 +147,22 @@ public class ConnectionServer{
         this._startClientListener();
     }
     
+    /**
+     * Starts the thread which listens for new clients attempting to connect to this server.
+     */
     protected void _startClientListener(){               
+        if(this.__new_connection_listener!=null){
+            if(this.__new_connection_listener.isAlive()){
+                return;  //Don't want to accidentally make a new thread!
+            }
+        }
+        
         this.__new_connection_listener=new Thread(){
             @Override public void run(){
                 try{
                     while(true){
                         System.out.print("Listening for incoming connection.\n");
-                        ConnectionServer.this._acceptClient(new ConnectionClient(ConnectionServer.this.__socket.accept(),false));
+                        ConnectionServer.this._acceptClient(new ConnectionClient(ConnectionServer.this.__socket.accept()));
                     }
                 }catch(IOException e){
                     //TODO_HIGH:  Make a handler for this exception here
