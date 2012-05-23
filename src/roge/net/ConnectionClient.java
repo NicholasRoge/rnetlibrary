@@ -9,6 +9,8 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
 
+import roge.net.ConnectionServer.Signals;
+
 /**
  * This object should be used to connect to a server which has an actively running <code>ConnectionServer</code> object, and can be used to transfer data back and forth through the connection.
  * 
@@ -26,6 +28,23 @@ public class ConnectionClient{
         @Override public String toString(){
             return "You must initialize the connection using the \"connect()\" method before you can send anything.";
         }
+    }
+    
+    /**
+     * Interface which allows the broadcasting of an object whenever one is sent by an this class.
+     * 
+     * @author Nicholas Rogé
+     */
+    public static interface DataSendListener{
+        /**
+         * Called whenever a ConnectionClient attempts to send any anything.
+         * 
+         * @param client Client who sent the signal.
+         * @param data Data sent.
+         * 
+         * @return If <code>true</code> is returned, then the object will be allowed to be sent.  Otherwise, the object will not be sent.
+         */
+        public boolean onDataSend(ConnectionClient client,Object data);
     }
     
     /**
@@ -61,12 +80,15 @@ public class ConnectionClient{
     private String                         __host_address;
     private ObjectInputStream              __input;
     private List<DataReceivedListener>     __data_received_listeners;
+    private List<DataSendListener>         __data_send_listeners;
     private Thread                         __message_listener;
     private ObjectOutputStream             __output;
     private int                            __port;
     private int                            __server_status;
     private List<SignalReceivedListener>   __signal_received_listeners;
     private Socket                         __socket;
+    private boolean                        __verbose;
+    
     
     /*Begin Constructors*/
     /**
@@ -89,6 +111,8 @@ public class ConnectionClient{
         
         this.__server_status=1;
         
+        this.setVerbose(false);
+        
         this._connect();
     }
     
@@ -108,6 +132,8 @@ public class ConnectionClient{
         }else{
             this.__server_status=1;
         }
+        
+        this.setVerbose(false);
     }
     /*End Constructors*/
     
@@ -134,6 +160,17 @@ public class ConnectionClient{
         }
     }
     /*End Getter Methods*/
+    
+    /*Begin Setter Methods*/
+    /**
+     * Allows or disallows the output of debug text.
+     * 
+     * @param verbose If <code>true</code> debugging text will be allowed.
+     */
+    public void setVerbose(boolean verbose){
+        this.__verbose=verbose;
+    }
+    /*End Setter Methods*/
     
     /*Begin Other Essential Methods*/
     /**
@@ -163,11 +200,24 @@ public class ConnectionClient{
     }
     
     /**
+     * Adds a listener to be called when data is attempting to be sent.
+     * 
+     * @param listener Object to be called upon data send attempt.
+     */
+    public void addDataSendListener(DataSendListener listener){
+        if(this.__data_send_listeners==null){
+            this.__data_send_listeners=new ArrayList<DataSendListener>();
+        }
+        
+        this.__data_send_listeners.add(listener);
+    }
+    
+    /**
      * Calls the onDataReceived method of all its listeners.
      * 
      * @param data Object being broadcasted.  If this parameter is null, a <code>NullPointerException</code> will be thrown.
      */
-    protected void _broadcastData(Object data){
+    protected void _broadcastDataReceived(Object data){
         if(data==null){
             throw new NullPointerException();
         }
@@ -180,11 +230,39 @@ public class ConnectionClient{
     }
     
     /**
+     * Calls the onDataSend method of all its listeners.
+     * 
+     * @param data Data attempting to be sent.
+     * 
+     * @return Returns <code>true</code> if the data should be sent, and <code>false</code> otherwise.
+     */
+    protected boolean _broadcastDataSend(Object data){
+        boolean send_data=true;
+        
+        
+        if(data==null){
+            throw new NullPointerException();
+        }
+        
+        if(this.__data_send_listeners!=null){
+            for(DataSendListener listener:this.__data_send_listeners){
+                if(!listener.onDataSend(this,data)){
+                    if(send_data){  //This is to ensure that all the listeners get called.
+                        send_data=false;
+                    }
+                }
+            }
+        }
+        
+        return send_data;
+    }
+    
+    /**
      * Calls the onSignalReceived method of all its listeners.
      * 
      * @param signal Signal being broadcasted.  If this parameter is null, a <code>NullPointerException</code> will be thrown.
      */
-    protected void _broadcastSignal(Signal signal){
+    protected void _broadcastSignalReceived(Signal signal){
         if(signal==null){
             throw new NullPointerException();
         }
@@ -222,7 +300,9 @@ public class ConnectionClient{
             this.__output=new ObjectOutputStream(this.__socket.getOutputStream());
             this.__output.flush();            
         }catch(IOException e){
-            System.out.print("Could not open the write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+            if(this.__verbose){
+                System.out.print("Could not open the write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+            }
             
             throw e;
         }
@@ -233,6 +313,9 @@ public class ConnectionClient{
                     ConnectionClient.this.__input=new ObjectInputStream(ConnectionClient.this.__socket.getInputStream());
                 }catch(IOException e){
                     System.out.print("Could not open the write stream on this client.  Cause:\n    "+e.getMessage()+"\n");
+                    if(ConnectionClient.this.__verbose){
+                        e.printStackTrace();
+                    }
                 }
             }
         }).start();
@@ -240,10 +323,12 @@ public class ConnectionClient{
         this._startMessageListener();
         
         while(this.__server_status==0){  //Block while the server isn't ready to receive data.
-            try {
+            try{
                 Thread.sleep(10);  //We have to add a small break to allow the variable to actually be modified.  //Ten milliseconds is the minimum amount of required to wait for this loop to function properly
-            } catch (InterruptedException e) {
-                e.printStackTrace();
+            }catch(InterruptedException e){
+                if(this.__verbose){
+                    e.printStackTrace();
+                }
             }
         }
         
@@ -270,15 +355,17 @@ public class ConnectionClient{
         if(this.__socket!=null){
             try{
                 if(send_connection_close_notice){
-                    this.send(new ConnectionServer.CloseConnectionSignal());
+                    this.send(new Signals.CloseConnection());
                 }
-                
+
                 this.__message_listener.interrupt();
                 this.__input.close();
                 this.__output.close();
                 this.__socket.close();
             }catch(Exception e){
-                e.printStackTrace();
+                if(this.__verbose){
+                    e.printStackTrace();
+                }
             }
         }
     }
@@ -305,6 +392,10 @@ public class ConnectionClient{
             throw new IOException(new NotConnected());
         }
         
+        if(!this._broadcastDataSend(data)){
+            return;
+        }
+        
         this.__output.writeObject(data);
     }
     
@@ -322,7 +413,9 @@ public class ConnectionClient{
             try{
                 Thread.sleep(10);
             }catch(InterruptedException e){
-                e.printStackTrace();
+                if(this.__verbose){
+                    e.printStackTrace();
+                }
             }
         }
         
@@ -330,23 +423,36 @@ public class ConnectionClient{
             @Override public void run(){
                 Object data=null;
 
-                try{
-                    while(true){
-                        data=ConnectionClient.this.__input.readObject();
-                        System.out.print("Data recieved:  "+data.toString()+"\n");
-
-                        if(data instanceof Signal){
-                            ConnectionClient.this._broadcastSignal((Signal)data);
-                        }else{
-                            ConnectionClient.this._broadcastData(data);
+                while(true){
+                    try{
+                            data=ConnectionClient.this.__input.readObject();
+                            if(ConnectionClient.this.__verbose){
+                                System.out.print("Data recieved:  "+data.toString()+"\n");
+                            }
+    
+                            if(data instanceof Signal){
+                                ConnectionClient.this._broadcastSignalReceived((Signal)data);
+                            }else{
+                                ConnectionClient.this._broadcastDataReceived(data);
+                            }
+                    }catch(ClassNotFoundException e){
+                        if(ConnectionClient.this.__verbose){
+                            System.out.print("Invalid object recieved.  Discarding.\n");
+                        }
+                    }catch(EOFException e){
+                        if(ConnectionClient.this.__verbose){
+                            System.out.print("Cannot read any further:  Remote connection closed.\n");
+                        }
+                        
+                        break;
+                    }catch(IOException e){
+                        if(!e.getMessage().equals("socket closed")){
+                            System.out.print("IOException caught while listening for incoming data!  Message:\n    "+e.getMessage()+"\n");
+                            if(ConnectionClient.this.__verbose){
+                                e.printStackTrace();
+                            }
                         }
                     }
-                }catch(ClassNotFoundException e){
-                    System.out.print(";;;\n");
-                }catch(EOFException e){
-                    System.out.print("Cannot read any further:  Remote connection closed.\n");
-                }catch(IOException e){
-                    System.out.print("IOException caught while listening for incoming data!  Message:\n    "+e.getMessage()+"\n");
                 }
             }
         });

@@ -14,10 +14,13 @@ import roge.net.ConnectionClient.SignalReceivedListener;
  * @author Nicholas Rogé
  */
 public class ConnectionServer implements DataReceivedListener,SignalReceivedListener{
-    /**Signal that should be sent when a client is closing its connection to the server.*/
-    public static class CloseConnectionSignal extends Signal{
-        private static final long serialVersionUID = 2882637983514840538L;
-    };
+    /**List of signals this object may send.*/
+    public static class Signals{
+        /**Signal that should be sent when a client is closing its connection to the server.*/
+        public static class CloseConnection extends Signal{
+            private static final long serialVersionUID = 2882637983514840538L;
+        };
+    }
     /**Data that will be received by the client if its connection to the server was a success.*/
     public static class ConnectSuccessSignal extends Signal{
         private static final long serialVersionUID = -1261872129312562381L;
@@ -63,6 +66,7 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
     private int                            __port;
     private ServerSocket                   __socket;
     private Thread                         __new_connection_listener;
+    private boolean                        __verbose;
     
     
     /*Begin Constructors*/
@@ -73,6 +77,8 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
      */
     public ConnectionServer(int port){
         this.__port=port;
+        
+        this.setVerbose(false);
     }
     /*End Constructors*/
     
@@ -80,8 +86,8 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
     @Override public void onDataReceived(ConnectionClient client,Object data){
     }
     
-    @Override public void onSignalReceived(ConnectionClient client,Signal signal){
-        if(signal instanceof CloseConnectionSignal){
+    @Override public void onSignalReceived(ConnectionClient client,Signal signal){        
+        if(signal instanceof Signals.CloseConnection){
             for(ClientDisconnectListener listener:this.getClientDisconnectListeners()){
                 listener.onClientDisconnect(client);
             }
@@ -134,6 +140,17 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
     }
     /*End Getter Methods*/
     
+    /*Begin Setter Methods*/
+    /**
+     * Allows or disallows the output of debug text.
+     * 
+     * @param verbose If <code>true</code> debugging text will be allowed.
+     */
+    public void setVerbose(boolean verbose){
+        this.__verbose=verbose;
+    }
+    /*End Setter Methods*/
+    
     /*Begin Other Essential Methods*/
     /**
      * Accepts or declines the client from connecting to the server.
@@ -163,12 +180,17 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
             }
 
             client.addDataRecievedListener(this);
-            System.out.print("Client connected from "+client.getIP()+" at "+formatter.format(new Date())+"\n\n");
+            client.addSignalListener(this);
+            if(this.__verbose){
+                System.out.print("Client connected from "+client.getIP()+" at "+formatter.format(new Date())+"\n\n");
+            }
         }else{
             try{
                 client.send(new ConnectFailureSignal());
             }catch(IOException e){
-                e.printStackTrace();
+                if(this.__verbose){
+                    e.printStackTrace();
+                }
             }
         }
     }
@@ -227,7 +249,9 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
             @Override public void run(){
                 try{
                     while(true){
-                        System.out.print("Listening for incoming connection.\n");
+                        if(ConnectionServer.this.__verbose){
+                            System.out.print("Listening for incoming connection.\n");
+                        }
                         ConnectionServer.this._acceptClient(new ConnectionClient(ConnectionServer.this.__socket.accept()));
                     }
                 }catch(IOException e){
