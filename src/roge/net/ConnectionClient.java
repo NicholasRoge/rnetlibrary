@@ -183,7 +183,9 @@ public class ConnectionClient{
             this.__signal_received_listeners=new ArrayList<SignalReceivedListener>();
         }
         
-        this.__signal_received_listeners.add(listener);
+        synchronized(this.__signal_received_listeners){
+            this.__signal_received_listeners.add(listener);
+        }
     }
     
     /**
@@ -196,7 +198,9 @@ public class ConnectionClient{
             this.__data_received_listeners=new ArrayList<DataReceivedListener>();
         }
 
-        this.__data_received_listeners.add(listener);
+        synchronized(this.__data_received_listeners){
+            this.__data_received_listeners.add(listener);
+        }
     }
     
     /**
@@ -209,7 +213,9 @@ public class ConnectionClient{
             this.__data_send_listeners=new ArrayList<DataSendListener>();
         }
         
-        this.__data_send_listeners.add(listener);
+        synchronized(this.__data_send_listeners){
+            this.__data_send_listeners.add(listener);
+        }
     }
     
     /**
@@ -223,8 +229,10 @@ public class ConnectionClient{
         }
         
         if(this.__data_received_listeners!=null){
-            for(DataReceivedListener listener:this.__data_received_listeners){
-                listener.onDataReceived(this,data);
+            synchronized(this.__data_received_listeners){
+                for(DataReceivedListener listener:this.__data_received_listeners){
+                    listener.onDataReceived(this,data);
+                }
             }
         }
     }
@@ -245,10 +253,12 @@ public class ConnectionClient{
         }
         
         if(this.__data_send_listeners!=null){
-            for(DataSendListener listener:this.__data_send_listeners){
-                if(!listener.onDataSend(this,data)){
-                    if(send_data){  //This is to ensure that all the listeners get called.
-                        send_data=false;
+            synchronized(this.__data_send_listeners){
+                for(DataSendListener listener:this.__data_send_listeners){
+                    if(!listener.onDataSend(this,data)){
+                        if(send_data){  //This is to ensure that all the listeners get called.
+                            send_data=false;
+                        }
                     }
                 }
             }
@@ -270,8 +280,10 @@ public class ConnectionClient{
         this._onSignalReceived(this,signal);
         
         if(this.__signal_received_listeners!=null){
-            for(SignalReceivedListener listener:this.__signal_received_listeners){
-                listener.onSignalReceived(this,signal);
+            synchronized(this.__signal_received_listeners){
+                for(SignalReceivedListener listener:this.__signal_received_listeners){
+                    listener.onSignalReceived(this,signal);
+                }
             }
         }
     }
