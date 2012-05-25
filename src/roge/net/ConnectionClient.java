@@ -178,7 +178,7 @@ public class ConnectionClient{
      * 
      * @param listener Object to be called upon signal receipt.
      */
-    public void addSignalListener(SignalReceivedListener listener){
+    public void addSignalReceivedListener(SignalReceivedListener listener){
         if(this.__signal_received_listeners==null){
             this.__signal_received_listeners=new ArrayList<SignalReceivedListener>();
         }
@@ -375,6 +375,8 @@ public class ConnectionClient{
             this.__server_status=1; //1 indicates that the server is ready to recieve data.
         }else if(signal instanceof ConnectionServer.ConnectFailureSignal){
             this.__server_status=-1;
+        }else if(signal instanceof ConnectionServer.Signals.CloseConnection){
+            this.disconnect(false);  //We don't need to send a reply to the server
         }
     }
     

@@ -138,6 +138,19 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
         
         return this.__client_disconnect_listeners;
     }
+    
+    /**
+     * Gets the status of the server, that is to say, whether it has been started or not.  
+     * 
+     * @Return Returns <code>true</code> if the server has been started and is currently listening for incoming data, and <code>false</code> otherwise.
+     */
+    public boolean isListening(){
+        if(this.__socket==null){
+            return false;
+        }else{
+            return !this.__socket.isClosed();
+        }
+    }
     /*End Getter Methods*/
     
     /*Begin Setter Methods*/
@@ -180,7 +193,7 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
             }
 
             client.addDataRecievedListener(this);
-            client.addSignalListener(this);
+            client.addSignalReceivedListener(this);
             if(this.__verbose){
                 System.out.print("Client connected from "+client.getIP()+" at "+formatter.format(new Date())+"\n\n");
             }
@@ -260,6 +273,31 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
             }
         });
         this.__new_connection_listener.start();
-    }    
+    }
+    
+    /**
+     * Stops the server.
+     */
+    public void stop(){
+        try{
+            for(ConnectionClient client:this.getClientList()){
+                client.send(new Signals.CloseConnection());
+                
+                this.onSignalReceived(client,new Signals.CloseConnection());
+            }
+            
+            this.__new_connection_listener.interrupt();
+            this.__socket.close();
+        }catch(IOException e){
+            System.out.println("An error occured while attemptting to stop the server.  Message:  "+e.getMessage());
+            if(this.__verbose){
+                e.printStackTrace();
+            }
+            
+            return;
+        }
+        
+        System.out.println("The server stopped successfully.");
+    }
     /*End Other Essential Methods*/
 }
