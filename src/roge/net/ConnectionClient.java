@@ -11,12 +11,45 @@ import java.util.List;
 
 import roge.net.ConnectionServer.Signals;
 
+/*
+ * TODO_HIGH:  As it stands, there is an issue with the current system of ensured message arrival.  Let's use this scenario:  Message A and Message B are both sent at roughly the same time, however, something happens to Message A and it never arrives at its destination.  This client will recieve the Ack for Message B and allow the thread attempting to send Message A to continue running, however, Message B's sender's thread will continue to block until a new Ack is received.
+ */
+
 /**
  * This object should be used to connect to a server which has an actively running <code>ConnectionServer</code> object, and can be used to transfer data back and forth through the connection.
  * 
  * @author Nicholas Rogé
  */
-public class ConnectionClient{    
+public class ConnectionClient{  
+    /**List of signals this object may send.*/
+    public static class Signals{
+        /**Signal which is sent when a piece of data is received by the server, indicating that it was successfully received.*/
+        public static class Ack extends Signal{
+            private static final long serialVersionUID = -4158558968368644951L;
+            
+            private Class<?> __received_signal_class;
+            
+            
+            /**
+             * Constructs the object.
+             * 
+             * @param object This should be the object that was received by the server.
+             */
+            public Ack(Object object){
+                this.__received_signal_class=object.getClass();
+            }
+            
+            /**
+             * Gets the Class of the data that was received by the server.  
+             * 
+             * @return The Class of the data that was received by the server.
+             */
+            public Class<?> getReceivedSignalClass(){
+                return this.__received_signal_class;
+            }
+        }
+    }
+    
     /**
      * Describes a condition in which the user has attempted to call the <code>send</code> method of this object without first having initialized the object by calling the <code>connect</code> method.
      * 
@@ -75,8 +108,12 @@ public class ConnectionClient{
          * @param data Object which was received.
          */
         public void onDataReceived(ConnectionClient client,Object data);
-   }
+    }
     
+    public static final int ENSURED_DATA_RECEIPT_TIMEOUT_PERIOD=3000;  //3 seconds
+    public static final int MAXIMUM_SEND_RETRY_COUNT=3;
+    
+    private Signals.Ack                            __ack_received;
     private String                         __host_address;
     private ObjectInputStream              __input;
     private List<DataReceivedListener>     __data_received_listeners;
@@ -88,7 +125,7 @@ public class ConnectionClient{
     private List<SignalReceivedListener>   __signal_received_listeners;
     private Socket                         __socket;
     private boolean                        __verbose;
-    
+
     
     /*Begin Constructors*/
     /**
@@ -183,9 +220,7 @@ public class ConnectionClient{
             this.__signal_received_listeners=new ArrayList<SignalReceivedListener>();
         }
         
-        synchronized(this.__signal_received_listeners){
-            this.__signal_received_listeners.add(listener);
-        }
+        this.__signal_received_listeners.add(listener);
     }
     
     /**
@@ -198,9 +233,7 @@ public class ConnectionClient{
             this.__data_received_listeners=new ArrayList<DataReceivedListener>();
         }
 
-        synchronized(this.__data_received_listeners){
-            this.__data_received_listeners.add(listener);
-        }
+        this.__data_received_listeners.add(listener);
     }
     
     /**
@@ -213,9 +246,7 @@ public class ConnectionClient{
             this.__data_send_listeners=new ArrayList<DataSendListener>();
         }
         
-        synchronized(this.__data_send_listeners){
-            this.__data_send_listeners.add(listener);
-        }
+        this.__data_send_listeners.add(listener);
     }
     
     /**
@@ -229,10 +260,8 @@ public class ConnectionClient{
         }
         
         if(this.__data_received_listeners!=null){
-            synchronized(this.__data_received_listeners){
-                for(DataReceivedListener listener:this.__data_received_listeners){
-                    listener.onDataReceived(this,data);
-                }
+            for(DataReceivedListener listener:this.__data_received_listeners){
+                listener.onDataReceived(this,data);
             }
         }
     }
@@ -253,12 +282,10 @@ public class ConnectionClient{
         }
         
         if(this.__data_send_listeners!=null){
-            synchronized(this.__data_send_listeners){
-                for(DataSendListener listener:this.__data_send_listeners){
-                    if(!listener.onDataSend(this,data)){
-                        if(send_data){  //This is to ensure that all the listeners get called.
-                            send_data=false;
-                        }
+            for(DataSendListener listener:this.__data_send_listeners){
+                if(!listener.onDataSend(this,data)){
+                    if(send_data){  //This is to ensure that all the listeners get called.
+                        send_data=false;
                     }
                 }
             }
@@ -280,10 +307,8 @@ public class ConnectionClient{
         this._onSignalReceived(this,signal);
         
         if(this.__signal_received_listeners!=null){
-            synchronized(this.__signal_received_listeners){
-                for(SignalReceivedListener listener:this.__signal_received_listeners){
-                    listener.onSignalReceived(this,signal);
-                }
+            for(SignalReceivedListener listener:this.__signal_received_listeners){
+                listener.onSignalReceived(this,signal);
             }
         }
     }
@@ -367,7 +392,7 @@ public class ConnectionClient{
         if(this.__socket!=null){
             try{
                 if(send_connection_close_notice){
-                    this.send(new Signals.CloseConnection());
+                    this.send(new ConnectionServer.Signals.CloseConnection(),true);
                 }
 
                 this.__message_listener.interrupt();
@@ -383,7 +408,9 @@ public class ConnectionClient{
     }
     
     protected void _onSignalReceived(ConnectionClient client,Signal signal){
-        if(signal instanceof ConnectionServer.ConnectSuccessSignal){
+        if(signal instanceof Signals.Ack){
+            this.__ack_received=(Signals.Ack)signal;
+        }else if(signal instanceof ConnectionServer.ConnectSuccessSignal){
             this.__server_status=1; //1 indicates that the server is ready to recieve data.
         }else if(signal instanceof ConnectionServer.ConnectFailureSignal){
             this.__server_status=-1;
@@ -393,13 +420,76 @@ public class ConnectionClient{
     }
     
     /**
-     * Sends the given data to the server.
+     * Removes the given DataReceivedListener from the list of listeners.
+     * 
+     * @param listener Listener to be removed.
+     */
+    public void removeDataReceivedListener(DataReceivedListener listener){
+        if(this.__data_received_listeners==null){
+            return;
+        }else if(!this.__data_received_listeners.contains(listener)){
+            return;
+        }
+        
+        this.__data_received_listeners.remove(listener);
+    }
+    
+    /**
+     * Removes the given DataSendListener from the list of listeners.
+     * 
+     * @param listener Listener to be removed.
+     */
+    public void removeDataSendListener(DataSendListener listener){
+        if(this.__data_send_listeners==null){
+            return;
+        }else if(!this.__data_send_listeners.contains(listener)){
+            return;
+        }
+        
+        this.__data_send_listeners.remove(listener);
+    }
+    
+    /**
+     * Removes the given SignalReceivedListener from the list of listeners.
+     * 
+     * @param listener Listener to be removed.
+     */
+    public void removeSignalReceivedListener(SignalReceivedListener listener){
+        if(this.__signal_received_listeners==null){
+            return;
+        }else if(!this.__signal_received_listeners.contains(listener)){
+            return;
+        }
+        
+        this.__signal_received_listeners.remove(listener);
+    }
+    
+    /**
+     * Wrapper for the <code>send(Object,boolean)</code> method.  Sets the ensure_arrival parameter to false.
      * 
      * @param data Data to be sent to the server.  If this is null, a NullPointerException will be thrown.
      * 
+     * @return Will return false if the data couldn't be sent, or true if the data was sent successfully.
+     */
+    public boolean send(Object data) throws IOException,NullPointerException{
+        return this.send(data,false);
+    }
+    
+    /**
+     * Sends the given data to the server.  IMPORTANT_NOTE:  This method will block the current thread until an Ack is successfully received.
+     * 
+     * @param data Data to be sent to the server.  If this is null, a NullPointerException will be thrown.
+     * @param ensure_arrival If this parameter is true, this method will attempt to make sure that the data being sent arrives.
+     * 
+     * @return Will return false if the data couldn't be sent, or true if the data was sent successfully.
+     * 
      * @throws IOException Thrown if the socket has not yet been initialized (with cause of type <code>ConnectionClient.NotConnected</code>, or if an issue occurred when attempting to send the data.
      */
-    public void send(Object data) throws IOException{
+    public boolean send(Object data,boolean ensure_arrival) throws IOException{
+        int  retry_count=1;
+        long wait_begin_time=0;
+        
+        
         if(data==null){
             throw new NullPointerException();
         }else if(this.__socket==null){
@@ -407,10 +497,48 @@ public class ConnectionClient{
         }
         
         if(!this._broadcastDataSend(data)){
-            return;
+            return false;
         }
         
-        this.__output.writeObject(data);
+        
+        if(ensure_arrival){
+            this.__ack_received=null;;
+            
+            while(true){
+                this.__output.writeObject(data);
+                
+                wait_begin_time=System.currentTimeMillis();
+                while(true){
+                    if(this.__ack_received!=null){
+                        //TODO:  figure out a way to determine if the ACK received is the correct ACK for the data that was sent.
+                        
+                        break;
+                    }
+                    
+                    if((System.currentTimeMillis()-wait_begin_time)>ConnectionClient.ENSURED_DATA_RECEIPT_TIMEOUT_PERIOD){
+                        retry_count++;
+                        
+                        if(retry_count>ConnectionClient.MAXIMUM_SEND_RETRY_COUNT){
+                            return false;
+                        }
+                        
+                        break;
+                    }
+                    
+                    try{
+                        Thread.sleep(10);
+                    }catch(InterruptedException e){
+                        e.printStackTrace();
+                    }
+                }
+                
+                break;
+            }
+        }else{
+            this.__output.writeObject(data);
+        }
+        
+        return true;
     }
     
     /**
@@ -449,6 +577,8 @@ public class ConnectionClient{
                             }else{
                                 ConnectionClient.this._broadcastDataReceived(data);
                             }
+                            
+                            ConnectionClient.this.send(new Signals.Ack(data),false);
                     }catch(ClassNotFoundException e){
                         if(ConnectionClient.this.__verbose){
                             System.out.print("Invalid object recieved.  Discarding.\n");
@@ -460,7 +590,9 @@ public class ConnectionClient{
                         
                         break;
                     }catch(IOException e){
-                        if(!e.getMessage().equals("socket closed")){
+                        if(e.getMessage().equals("socket closed")){
+                            break;
+                        }else{
                             System.out.print("IOException caught while listening for incoming data!  Message:\n    "+e.getMessage()+"\n");
                             if(ConnectionClient.this.__verbose){
                                 e.printStackTrace();

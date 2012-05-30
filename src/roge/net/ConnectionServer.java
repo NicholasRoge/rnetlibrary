@@ -187,7 +187,7 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
         if(accept_client){
             this.getClientList().add(client);
             try{
-                client.send(new ConnectSuccessSignal());
+                client.send(new ConnectSuccessSignal(),false);
             }catch(IOException e){
                 e.toString();
             }
@@ -199,7 +199,7 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
             }
         }else{
             try{
-                client.send(new ConnectFailureSignal());
+                client.send(new ConnectFailureSignal(),false);
             }catch(IOException e){
                 if(this.__verbose){
                     e.printStackTrace();
@@ -281,7 +281,7 @@ public class ConnectionServer implements DataReceivedListener,SignalReceivedList
     public void stop(){
         try{
             for(ConnectionClient client:this.getClientList()){
-                client.send(new Signals.CloseConnection());
+                client.send(new Signals.CloseConnection(),true);
                 
                 this.onSignalReceived(client,new Signals.CloseConnection());
             }
